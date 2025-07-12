@@ -1,6 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 use core::convert;
 use core::fmt;
+use core::fmt::Write;
 
 //RESET
 pub const RESET: &str = "\x1b[0m";
@@ -17,6 +18,7 @@ pub const ST: &str = "\x1b[9m";
 
 // STYLE RESETS
 pub const NORMAL_INTENSITY: &str = "\x1b[22m";
+pub const NORMAL: &str = "\x1b[22m";
 pub const NOIN: &str = "\x1b[22m";
 
 pub const NO_UNDERLINE: &str = "\x1b[24m";
@@ -101,7 +103,7 @@ impl fmt::Display for ColorError {
 /// > environmental variable detection and caching with OnceLock?
 ///
 /// this is Claude's example...
-/*
+/* ----------------------------------------------------------------------
 "static DETECTED_CAPABILITY: OnceLock<RenderTarget> = OnceLock::new();
 
 fn detect_terminal_capability() -> RenderTarget {
@@ -110,7 +112,7 @@ fn detect_terminal_capability() -> RenderTarget {
     Check if stdout.is_terminal()
     Return appropriate capability
 }
-*/
+*///----------------------------------------------------------------------
 /// > advanced Display impl for each Ansi that matches on cached env capability
 ///
 ///
@@ -122,41 +124,139 @@ const FG_EXTENDED: &str = "\x1b[38;";
 const UL_EXTENDED: &str = "\x1b[58;";
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct TrueColor(u8, u8, u8);
+pub struct TrueColor(pub u8, pub u8, pub u8);
 impl Ansi for TrueColor {}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Extended(u8);
-impl Ansi for Extended {}
+pub struct Color256(pub u8);
+impl Ansi for Color256 {}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Basic(&'static str);
+pub struct Basic(pub &'static str);
 impl Ansi for Basic {}
 
+// Fg Bg structs
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Fg<T: Ansi>(T);
+pub struct Fg<T: Ansi>(pub T);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct Bg<T: Ansi>(T);
+pub struct Bg<T: Ansi>(pub T);
 
-impl convert::From<TrueColor> for Extended {
+/*
+impl convert::From<TrueColor> for Color256 {
     fn from(color: TrueColor) -> Self {
         color
     }
 }
+*/
 
-/*macro_rules! impl_enums {
+trait WriteU8Str {
+    fn write_u8_str(&mut self, val: u8) -> fmt::Result;
+}
+
+impl WriteU8Str for fmt::Formatter<'_> {
+    fn write_u8_str(&mut self, val: u8) -> fmt::Result {
+        match val {
+            0..=9 => {
+                self.write_char((b'0' + val) as char)?;
+            }
+            10..=99 => {
+                self.write_char((b'0' + (val / 10)) as char)?;
+                self.write_char((b'0' + (val % 10)) as char)?;
+            }
+            100..=255 => {
+                self.write_char((b'0' + (val / 100)) as char)?;
+                self.write_char((b'0' + (val / 10) % 10) as char)?;
+                self.write_char((b'0' + (val % 10)) as char)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Fg<TrueColor> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(FG_EXTENDED)?;
+        f.write_str("2;")?;
+        f.write_u8_str(self.0.0)?;
+        f.write_char(';')?;
+        f.write_u8_str(self.0.1)?;
+        f.write_char(';')?;
+        f.write_u8_str(self.0.2)?;
+        f.write_char('m')?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Bg<TrueColor> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(BG_EXTENDED)?;
+        f.write_str("2;")?;
+        f.write_u8_str(self.0.0)?;
+        f.write_char(';')?;
+        f.write_u8_str(self.0.1)?;
+        f.write_char(';')?;
+        f.write_u8_str(self.0.2)?;
+        f.write_char('m')?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Fg<Color256> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(FG_EXTENDED)?;
+        f.write_str("5;")?;
+        f.write_u8_str(self.0.0)?;
+        f.write_char('m')?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Bg<Color256> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(BG_EXTENDED)?;
+        f.write_str("5;")?;
+        f.write_u8_str(self.0.0)?;
+        f.write_char('m')?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Fg<Basic> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(self.0.0)?;
+        Ok(())
+    }
+}
+
+impl fmt::Display for Bg<Basic> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(self.0.0)?;
+        Ok(())
+    }
+}
+
+#[test]
+fn truecolor() {
+    let bg_intorange = Bg(TrueColor(0xff, 0x4f, 0x00));
+    dbg!(bg_intorange);
+    println!("half of this {bg_intorange}string should be orange!{RESET}");
+}
+
+#[test]
+fn colors() {
+    println!(
+        "{bg_gray} The {BOLD}{BLUE}quick {brown}brown {RED}fox{DEFAULT}{NORMAL} jumped over the {BOLD}{YELLOW}lazy {brown}dog!{RESET}",
+        bg_gray = Bg(Color256(53)),
+        brown = Fg(TrueColor(0x72, 0x55, 0x3d))
+    );
+    println!("{BG_RED}{UL}{BOLD}{ST}hihihihihihihihihihihihihihihihihihihiihi");
+    println!("hihih{NOUL}ihihihihi{NOIN}hihihihihihih{NOST}ihihihihihi{BG_DEFAULT}hihihi");
+}
+
+/*macro_rules! implcolors{
     ($(($enum_type:ident, $variant:ident)),*) => {
         $(
-            impl fmt::Display for $enum_type {
-                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    match self {
-                        Fg::FgTrueColor(r, g, b) => write!(f, "{FG_EXTENDED}2;{r};{g};{b}m"),
-                        Fg::FgWebColor(n) => write!(f, "{FG_EXTENDED}5;{n}m"),
-                        Fg::FgCodeColor(code) => f.write_str(code),
-                    }
-                }
-            }
             impl convert::From<(u8, u8, u8)> for $enum_type {
                 fn from(rgb: (u8, u8, u8)) -> Self {
                     let (r, g, b) = rgb;
@@ -182,13 +282,6 @@ impl convert::From<TrueColor> for Extended {
 }*/
 
 //impl_enums!((Fg, FgTrueColor), (Bg, BgTrueColor), (Ul, UlTrueColor));
-
-#[test]
-fn truecolor() {
-    let bg_intorange = Bgr::try_from(0xFF4F01).unwrap();
-    dbg!(bg_intorange);
-    assert_eq!(bg_intorange, Bg::BgTrueColor(0xFF, 0x4F, 0x00))
-}
 
 /*macro_rules! truecolor_fg {
 ( $hex:literal ) => {{
